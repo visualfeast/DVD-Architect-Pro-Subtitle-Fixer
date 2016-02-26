@@ -1,0 +1,369 @@
+/*
+ * * * Compile_AHK SETTINGS BEGIN * * *
+
+[AHK2EXE]
+Exe_File=%In_Dir%\DVD Architect Pro Subtitle Fixer.exe
+Created_Date=1
+[VERSION]
+Set_Version_Info=1
+Company_Name=Visualfeast
+File_Description=Automates using DVDSubEdit to remove the Set field indexes line after subtitle Stop commands
+File_Version=1.7.0.5
+Inc_File_Version=1
+Internal_Name=fix_subtitles_for_BD5
+Legal_Copyright=2016 visualfeast@hotmail.com
+Original_Filename=DVD Architect Pro Subtitle Fixer.exe
+Product_Name=DVD Architect Pro Subtitle Fixer
+Product_Version=1.7.0.5
+Inc_Product_Version=1
+[ICONS]
+Icon_1=%In_Dir%\fix_subtitles_for_BD5.ahk_1.ico
+
+* * * Compile_AHK SETTINGS END * * *
+*/
+
+; -------------------------------------------
+; script by Visualfeast // visualfeast@hotmail.com
+; last modified 2-26-2016
+; -------------------------------------------
+
+appname = DVD Architect Pro Subtitle Fixer v1.7
+
+
+#NoEnv
+SendMode Input
+SetWorkingDir %A_ScriptDir%
+FileInstall, DVDSubEdit.exe, %A_ScriptDir%\DVDSubEdit.exe
+#Singleinstance,force
+
+start:
+wait = 0
+countchange = 0
+spucount = 0
+totaltime = 0
+remainavg = 1
+breakloop = 0
+saveafter = 0
+saving = 0
+wait = 1
+first = 1
+sleeptime = 15
+showremainingtime = (calculating...)
+formattime, thetime, , yyyy-MM-dd__HH-mm-ss
+
+
+; run and center the program
+IfWinNotExist, ahk_exe DVDSubEdit.exe
+	Run, "DVDSubEdit.exe"
+sleep 500
+CenterWindow(ahk_exe DVDSubEdit.exe)
+
+ControlGetText, spus, Edit5, ahk_exe DVDSubEdit.exe ;get total number of subtitles in project
+StringTrimRight, spus, spus, 5 ;trim " SPUs"
+
+gosub checkit ;returns richedittext (first line, trimmed), richeditendtext (last 2 lines)
+gosub spuselected ;returns: remainingspus (how many left to check), currentspu (which spu we're on)
+
+
+
+; message if no VOBs open ------------------------
+if (spus = 0) {
+	Msgbox,1,%appname%, Please open all VOBs in DVDSubEdit before continuing (you can select multiples).`n`n(%spus% SPUs found!)`n`nPress OK once you've opened all the VOBs.
+	ifmsgbox OK
+		goto start
+	ExitApp
+	}
+
+
+
+; opening message ------------------------
+msgbox,1,%appname%, Welcome to the DVD Architect Pro Subtitle Fixer.`n`nThis program will automate using DVDSubEdit to remove`nthe "Set field indexes" line after subtitle Stop commands.`n`nMake sure:`n`n• DVDSubEdit is open`n• Set to the default size`n• You have opened all VOBs for your DVD (you currently have at least 1 VOB open)`n• You're on the timecode/subtitle position at which you want to begin processing`n   (you're currently on %currentspu% out of %spus%).`n• Speakers are muted (there are annoying 'dings' each change)`n• Un-check 'Show Video Frame' for potentially faster processing (optional)`n`nWhen you're ready to start`, press OK.
+ifmsgbox, Cancel
+	ExitApp
+	
+; re-check incase user changed current subtitle #
+gosub checkit
+gosub spuselected
+
+
+
+; ask about check only ------------------------
+; 4 (yes/no) + 32 (question mark) + 256 (2nd button default) = 292
+msgbox,292,%appname%,Is this the second run?`n`n`nNOTE: This program may miss some subtitles on the first try. It is recommended to run twice`, to check for missed subtitles.`n`n• Press ESC at any time to cancel`n• Press SHIFT at any time to pause
+ifmsgbox, Yes
+	{
+	checkonly = 1
+	WinActivate ahk_exe DVDSubEdit.exe ;make sure it's in front
+	Send, {home} ;go to first subtitle
+	sleep 500
+	remainingspus = %spus%
+	TempFile := A_ScriptDir "\SPUsFound_" . thetime . ".txt" ;set temp file
+	sleeptime = 200
+	goto checkonly
+	}
+
+
+
+
+; ask about save ------------------------
+msgbox,292,%appname%, Do you want to auto-save your VOB(s) after completion?`n`n`nAbout to remove "Set field indexes" from %remainingminus1% SPUs.`n`n• Press ESC at any time to cancel`n• Press SHIFT at any time to pause
+ifmsgbox, Yes
+	saveafter = 1
+ifmsgbox, Cancel
+	ExitApp
+
+
+
+checkonly:
+
+; hotkeys
+if (wait = 1){
+	Hotkey, ESC, setbreakloop
+	Hotkey, SHIFT, pausethis
+	}
+
+WinActivate ahk_exe DVDSubEdit.exe ;make sure it's in front
+sleep 100
+
+Loop, %remainingspus%
+	{
+	spusleft := remainingspus - spucount
+	starttime := A_TickCount ;start timer
+	WinActivate ahk_exe DVDSubEdit.exe ;make sure it's in front
+	
+	gosub, doit
+	
+	if (breakloop = 1) {
+		break
+		goto broke
+		}
+	
+	; do some time calculating...
+	elapsedtime := A_TickCount - StartTime
+	totaltime := elapsedtime + totaltime
+	dividedtime := (totaltime / 1000)
+	dividedtime := Round(dividedtime)
+	showdividedtime = %dividedtime% seconds
+	if (dividedtime > 59) {
+		dividedtime := Round(dividedtime / 60,1)
+		showdividedtime = %dividedtime% minutes
+		}
+	remainavg +=1
+	remainingtime = (calculating...)
+	avgremainingtime := remainingtime + remainingtime
+	if (remainavg = 30) {
+		remainavg = 1
+		remainingtime := avgremainingtime / 30
+		remainingtime := Round((spusleft * elapsedtime)/1000/60,1)
+		showremainingtime = %remainingtime% minutes
+		if (remainingtime < 1) {
+			remainingtime := Round(remainingtime * 60)
+			showremainingtime = %remainingtime% seconds
+			}
+		}
+	
+	}
+
+
+; if 2nd round check ------------------------
+if (checkonly = 1) {
+	if (countchange > 0) {
+		;FileRead, checkonlyfound, %tempfile%
+		msgbox,64,%appname%, Found and changed %countchange% subtitles in %showdividedtime%.`n`n(saved as %tempfile%)`n`nRemember to save your file(s)!
+		ExitApp
+		}
+	}
+
+
+; if save is chosen --------------------------
+if (saveafter = 1) {
+	if (countchange >0) {
+		;saving = 1
+		SplashTextOn,600,200,%appname%, `n`n`n`n%countchange% SPUs changed... saving in a few seconds.`nHit ESC now to cancel save.
+		;if (saving = 1) {
+			sleep 5000
+		;	}
+		SplashTextOff
+		;if (saving = 1) {
+			Send ^s
+			sleep 1000
+			Send {Enter}
+			sleep 500
+			msgbox,,%appname%, Completed %countchange% changes out of %remainingminus1% subtitles in %showdividedtime%.
+			ExitApp
+		;	}
+		} else {
+			msgbox,,%appname%, No 'Set field indexes' found in %remainingminus1% subtitles checked.
+			ExitApp
+		}
+		
+	}
+
+
+; after pressing ESC and/or after loop is done
+broke:
+	tooltip
+	msgbox,,%appname%, Completed %countchange% changes out of %remainingminus1% subtitles in %showdividedtime%.`n`nRemember to save your file(s)!
+	ExitApp
+
+
+
+
+; main loop ------------------------------
+doit:
+
+transform, totaltime, round, totaltime
+tooltip, Checked: %spucount% `nChanged: %countchange%`nElapsed time: %showdividedtime%`nEstimated time remaining: %showremainingtime%
+
+gosub checkit
+
+afterfirst:
+
+if (howoften(richeditendtext,"Set field indexes") = 1)
+	{
+	firstone:
+	ControlGetText, data, Edit10, ahk_exe DVDSubEdit.exe
+
+	sleep %sleeptime%
+	ControlClick, button2, ahk_exe DVDSubEdit.exe ;inf
+	SendEvent {Click, 642, 437} ;ahk_exe DVDSubEdit.exe ;Slider1
+	
+	sleep %sleeptime%
+	Send {Enter}
+	
+	sleep %sleeptime%
+	ControlClick, Edit10, ahk_exe DVDSubEdit.exe,,X2
+	
+	sleep %sleeptime%
+	Send {a}
+	
+	sleep %sleeptime%
+	Send %data%
+	ControlSetText, Edit10, %data%, ahk_exe DVDSubEdit.exe
+	ControlClick, Edit10, ahk_exe DVDSubEdit.exe
+
+	sleep %sleeptime%
+	Send {Enter}
+	sleep %sleeptime%
+	
+	if (first = 1){
+		first = 0
+		sleep 500
+		goto afterfirst
+		}
+	countchange +=1
+	checkonlycount = 1
+	}
+	
+spucount +=1
+send {Right}
+
+if (checkonly = 1) {
+	if (checkonlycount > 0) {
+		FileAppend, %seventh_array7%, %TempFile%  ; write timecodes changed to temp file 
+		checkonlycount = 0
+		}
+	}
+	
+return
+	
+
+
+
+; DVDSubEdit not open -----------------------
+notfound:
+	Run, "DVDSubEdit.exe"
+return
+
+
+; pressed ESC -----------------------
+setbreakloop:
+	SplashTextOff
+	saving = 0
+	breakloop = 1
+return
+
+
+; pressed SPACE -----------------------
+pausethis:
+	msgbox,,%appname%, PAUSED. Press OK to continue.
+	sleep 500
+	WinActivate ahk_exe DVDSubEdit.exe ;make sure it's in front
+return
+
+
+; get data -----------------------
+checkit:
+	ControlGetText, subpicnumber, RICHEDIT1, ahk_exe DVDSubEdit.exe ;get all text from subpic info
+	stringgetpos, pos, subpicnumber, `n  ;
+	richedittext := substr(subpicnumber, 1, pos) ;gets first line
+	StringSplit, seventh_array, subpicnumber, `n, .  ;gets timecode (array #7) & omits period
+	StringTrimLeft, richedittext, richedittext, 10 ;trim first line
+	richeditendtext := strtail(2,subpicnumber) ;gets last 2 lines
+return
+
+
+; get which subtitle we're on -----------------------
+spuselected:
+	StringSplit, word_array, richedittext, %A_Space%, . 
+	remainingspus := spus-word_array1+1
+	currentspu := word_array1+1
+	remainingminus1 := remainingspus-1 ;fix for display purpose
+return
+
+
+
+
+
+; ----------- functions --------------
+
+
+
+; center the app -----------------------
+CenterWindow(WinTitle)
+	{
+	WinGetPos,,, Width, Height, %WinTitle%
+	WinMove, %WinTitle%,, (A_ScreenWidth/2)-(Width/2), (A_ScreenHeight/2)-(Height/2)
+	}
+
+
+
+
+; read last lines of a string -----------------------
+StrTail(k,str) ;; Inspired by Laszlo (http://www.autohotkey.com/forum/topic6928.html)
+	{
+	Loop,Parse,str,`n
+		{
+		i := Mod(A_Index,k)
+		L%i% = %A_LoopField%
+		}
+	L := L%i%
+	Loop,% k-1
+		{
+		If i < 1
+			SetEnv,i,%k%
+		i-- ;Mod does not work here 
+		L := L%i% "`n" L
+		}
+	Return L
+	}
+
+
+
+; check for phrase -----------------------
+howoften(haystack,needle)
+	{
+	count = 0
+	pos = 0
+	Loop,
+		{
+		StringGetPos, pos, haystack, %needle%,, %pos%    
+		If (Errorlevel<>0)
+		  break
+		count +=1
+		pos +=1
+		}    
+	return count
+	}
+
+
